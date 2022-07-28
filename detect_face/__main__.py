@@ -54,21 +54,22 @@ def get_best_face_image(face_cascade, img_path):
 
 def get_all_faces_image(face_cascade, model, img_path):
     img = cv2.imread(img_path)
-    faces = face_cascade.detectMultiScale(img, 1.1, 2)
+    faces = face_cascade.detectMultiScale(img, 1.1, 4)
 
     ret = []
     for face in faces:
         (x, y, w, h) = face
 
         cropped = img[y:y+h, x:x+w]
-        ret.append(
+        ret.append((
+            face,
             img_2_vec(
                 model,
                 cv2.resize(cropped, MODEL_INPUT_SHAPE, interpolation=cv2.INTER_LANCZOS4)
-            )
-        )
+            ),
+        ))
 
-    return ret
+    return (img, ret, )
 
 
 def main():
@@ -102,13 +103,14 @@ def main():
 
         print(f"[INFO] checking frame... {frame_name}")
 
-        for frame_face_idx in range(len(frames_faces[frame_idx])):
-            best = (99999.9, "no face", "no frame")
+        for frame_face_idx in range(len(frames_faces[frame_idx][1])):
+            best = (99999.9, "no face", "no frame", (0, 0, 0, 0, ), )
             for badge_idx in range(len(args["badges"])):
+                face_coord, face_image = frames_faces[frame_idx][1][frame_face_idx]
 
-                dist = 1 - spatial.distance.cosine(frames_faces[frame_idx][frame_face_idx], badges_faces[badge_idx])
+                dist = 1 - spatial.distance.cosine(face_image, badges_faces[badge_idx])
                 if dist < best[0]:
-                    best = (dist, args["badges"][badge_idx], frame_name)
+                    best = (dist, args["badges"][badge_idx], frame_name, face_coord, )
 
             if best[1] not in best_for_each:
                 best_for_each[best[1]] = best
@@ -118,6 +120,34 @@ def main():
 
     for badge, best in best_for_each.items():
         print(f"[FOUND] {badge} in frame {best[2]} ({best[0]})")
+
+    for frame_idx in range(len(args["frames"])):
+        frame_name = args["frames"][frame_idx]
+        img = frames_faces[frame_idx][0]
+
+        for badge, best in best_for_each.items():
+            if best[2] == frame_name:
+                (x, y, w, h) = best[3]
+                img = cv2.rectangle(
+                    img,
+                    (x, y, ),
+                    (x+w, y+h, ),
+                    (0, 255, 0),
+                    1
+                )
+                img = cv2.putText(
+                    img,
+                    best[1],
+                    (x, y+h+8, ),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (0, 255, 0),
+                    1,
+                    cv2.LINE_AA
+                )
+
+        cv2.imshow(frame_name, img)
+        cv2.waitKey()
 
 
 main()
