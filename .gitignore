@@ -1,3 +1,6 @@
 lfw-funneled.tgz.zip
 venv/
 lfw_funneled/
+*.png
+lfw_funneled.tar.xz
+.DS_Store

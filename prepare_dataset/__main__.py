@@ -1,8 +1,7 @@
-# import the necessary packages
-import os
 import argparse
-import numpy as np
 import cv2
+import numpy as np
+import os
 
 def get_args():
     ap = argparse.ArgumentParser()
@@ -12,7 +11,7 @@ def get_args():
     	help="width of the output")
     ap.add_argument("-d", "--dir", default="lfw_funneled",
     	help="path to dir with images")
-    ap.add_argument("-x", "--modelxml", default="haarcascade_frontalface_default.xml",
+    ap.add_argument("-x", "--modelxml", default="models/haarcascade_frontalface_default.xml",
     	help="path to haarcascade xml file")
     return vars(ap.parse_args())
 
@@ -20,7 +19,7 @@ def main():
     args = get_args()
 
     print("[INFO] loading model...")
-    face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+    face_cascade = cv2.CascadeClassifier(args['modelxml'])
 
     print("[INFO] detecting faces...")
     for person_name in os.listdir(args["dir"]):
@@ -60,7 +59,7 @@ def main():
             (x, y, w, h) = biggest_face
 
             cropped = img[y:y+h, x:x+w]
-            resized = cv2.resize(cropped, (args["heigh"], args["width"]), interpolation= cv2.INTER_LANCZOS4)
+            resized = cv2.resize(cropped, (args["heigh"], args["width"]), interpolation=cv2.INTER_LANCZOS4)
             cv2.imwrite(person_name_pic, resized)
             # cv2.imshow('Face', resized)
             # cv2.waitKey()
