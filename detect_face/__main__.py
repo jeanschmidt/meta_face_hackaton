@@ -18,6 +18,8 @@ def get_args():
     	help="frames to detect faces")
     ap.add_argument("-b", "--badges", nargs='+', required=True,
     	help="badges as references")
+    ap.add_argument('-d', '--debug', default=False, action='store_true',
+        help="display help")
     return vars(ap.parse_args())
 
 
@@ -54,13 +56,15 @@ def get_best_face_image(face_cascade, img_path):
 
 def get_all_faces_image(face_cascade, model, img_path):
     img = cv2.imread(img_path)
-    faces = face_cascade.detectMultiScale(img, 1.1, 4)
+    faces = face_cascade.detectMultiScale(img, 1.1, 5)
 
     ret = []
     for face in faces:
         (x, y, w, h) = face
 
         cropped = img[y:y+h, x:x+w]
+        # cv2.imshow('frame_name', cropped)
+        # cv2.waitKey()
         ret.append((
             face,
             img_2_vec(
@@ -72,12 +76,17 @@ def get_all_faces_image(face_cascade, model, img_path):
     return (img, ret, )
 
 
+def print_dbg(args, *pargs, **pkwargs):
+    if args["debug"]:
+        print(*pargs, **pkwargs)
+
+
 def main():
     args = get_args()
 
     print("[INFO] loading APN model...")
     model = APN_Model()
-    model.load_state_dict(torch.load("models/best_model_0.1.pt"))
+    model.load_state_dict(torch.load("models/best_model_0.1.pt", map_location=torch.device('cpu')))
     model.eval()
 
     print("[INFO] loading face model...")
@@ -101,17 +110,20 @@ def main():
     for frame_idx in range(len(args["frames"])):
         frame_name = args["frames"][frame_idx]
 
-        print(f"[INFO] checking frame... {frame_name}")
+        print_dbg(args, f"checking frame... {frame_name} ({len(frames_faces[frame_idx][1])})")
 
         for frame_face_idx in range(len(frames_faces[frame_idx][1])):
-            best = (99999.9, "no face", "no frame", (0, 0, 0, 0, ), )
+            best = (999999.9, "no face", "no frame", (0, 0, 0, 0, ), )
+            print_dbg(args, f"checking face {frame_face_idx}")
             for badge_idx in range(len(args["badges"])):
                 face_coord, face_image = frames_faces[frame_idx][1][frame_face_idx]
 
-                dist = 1 - spatial.distance.cosine(face_image, badges_faces[badge_idx])
+                dist = spatial.distance.cosine(face_image, badges_faces[badge_idx])
+                print_dbg(args, f"    distance for {args['badges'][badge_idx]}: {dist}")
                 if dist < best[0]:
                     best = (dist, args["badges"][badge_idx], frame_name, face_coord, )
 
+            print_dbg(args, f"best for face {frame_face_idx} in frame {args['frames'][frame_idx]} is {best[1]} ({best[0]})")
             if best[1] not in best_for_each:
                 best_for_each[best[1]] = best
             else:
@@ -138,9 +150,9 @@ def main():
                 img = cv2.putText(
                     img,
                     best[1],
-                    (x, y+h+8, ),
+                    (x, y+h+15, ),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.4,
+                    0.8,
                     (0, 255, 0),
                     1,
                     cv2.LINE_AA
