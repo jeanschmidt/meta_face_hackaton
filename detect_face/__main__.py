@@ -200,10 +200,20 @@ def main():
                 badge,
                 (x, y+h+15, ),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 128, 128),
                 1,
-                cv2.LINE_AA
+                (0, 200, 200),
+                4,
+                cv2.LINE_AA,
+            )
+            curr_frame = cv2.putText(
+                curr_frame,
+                badge,
+                (x, y+h+15, ),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 0),
+                2,
+                cv2.LINE_AA,
             )
 
         cap_out.write(curr_frame)
