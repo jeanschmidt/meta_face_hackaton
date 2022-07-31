@@ -1,21 +1,21 @@
+from scipy import spatial
 from skimage import io
 import argparse
 import cv2
 import itertools
 import numpy as np
+import sys
 import torch
-from scipy import spatial
-
 from .model import APN_Model
-
+from collections import defaultdict
 
 MODEL_INPUT_SHAPE = (128, 128)
 
 
 def get_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("-f", "--frames", nargs='+', required=True,
-    	help="frames to detect faces")
+    ap.add_argument("-v", "--video", required=True,
+    	help="video to detect faces")
     ap.add_argument("-b", "--badges", nargs='+', required=True,
     	help="badges as references")
     ap.add_argument('-d', '--debug', default=False, action='store_true',
@@ -54,9 +54,8 @@ def get_best_face_image(face_cascade, img_path):
     return cv2.resize(cropped, MODEL_INPUT_SHAPE, interpolation=cv2.INTER_LANCZOS4)
 
 
-def get_all_faces_image(face_cascade, model, img_path):
-    img = cv2.imread(img_path)
-    faces = face_cascade.detectMultiScale(img, 1.1, 5)
+def get_all_faces_image(face_cascade, model, img):
+    faces = face_cascade.detectMultiScale(img, 1.1, 3)
 
     ret = []
     for face in faces:
@@ -73,7 +72,7 @@ def get_all_faces_image(face_cascade, model, img_path):
             ),
         ))
 
-    return (img, ret, )
+    return ret
 
 
 def print_dbg(args, *pargs, **pkwargs):
@@ -81,12 +80,65 @@ def print_dbg(args, *pargs, **pkwargs):
         print(*pargs, **pkwargs)
 
 
+def reorder_closest_points(last, atual):
+    for last_frame_face in last:
+        one = None
+        distance = 99999999999999
+        if atual:
+            for i, atual_frame_face in enumerate(atual):
+                d = (last_frame_face[2][0] - atual_frame_face[2][0]) ** 2 + (last_frame_face[2][1] - atual_frame_face[2][1])
+                if d < distance:
+                    distance = d
+                    one = (atual_frame_face, i, )
+            atual.pop(one[1])
+            yield one[0]
+        else:
+            yield last_frame_face
+
+def process_one_frame(face_cascade, model, frame, args, badges_faces):
+    frame_faces = get_all_faces_image(face_cascade, model, frame)
+    faces_scores = []
+
+    for frame_face_idx in range(len(frame_faces)):
+        face_coord, face_embedding = frame_faces[frame_face_idx]
+
+        for badge_idx in range(len(args["badges"])):
+            dist = spatial.distance.cosine(face_embedding, badges_faces[badge_idx])
+            faces_scores.append((dist, args["badges"][badge_idx], face_coord, ))
+
+    faces_scores.sort(key=lambda x: x[0])
+
+    draw_badge = set()
+    draw_area = set()
+    for score, badge, face_coord in faces_scores:
+        (x, y, w, h, ) = face_coord
+        face_coord = (x, y, w, h, )
+
+        if badge in draw_badge or face_coord in draw_area:
+            continue
+        draw_badge.add(badge)
+        draw_area.add(face_coord)
+
+        yield (score, badge, face_coord, )
+
+def most_likely_face(frames_window, face_idx):
+    counts = defaultdict(int)
+    for frame in frames_window:
+        counts[frame[face_idx][1]] += 1
+    mx = 0
+    badge = ""
+    for b, c in counts.items():
+        if c > mx:
+            mx = c
+            badge = b
+    return badge
+
 def main():
     args = get_args()
 
     print("[INFO] loading APN model...")
     model = APN_Model()
-    model.load_state_dict(torch.load("models/best_model_0.1.pt", map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load("models/best_model_0.3.1.pt", map_location=torch.device('cpu')))
     model.eval()
 
     print("[INFO] loading face model...")
@@ -98,68 +150,118 @@ def main():
         for i in args["badges"]
     ]
 
-    print("[INFO] detecting faces in frames...")
-    frames_faces = [
-        get_all_faces_image(face_cascade, model, i)
-        for i in args["frames"]
-    ]
+    FRAME_RATE = 19
+    cap_in = cv2.VideoCapture(args["video"])
+    frame_width = int(cap_in.get(3))
+    frame_height = int(cap_in.get(4))
+    cap_out = cv2.VideoWriter(args["video"] + "out.avi", cv2.VideoWriter_fourcc('M','J','P','G'), FRAME_RATE, (frame_width,frame_height))
 
-    print("[INFO] scoring faces...")
-    best_for_each = {}
+    print("[INFO] Processing frames...")
 
-    for frame_idx in range(len(args["frames"])):
-        frame_name = args["frames"][frame_idx]
+    WINDOW_SIZE = 3 * FRAME_RATE
+    _, frame = cap_in.read()
+    frames_window = [frame, ]
+    frames_window_faces = [process_one_frame(face_cascade, model, frame, args, badges_faces), ]
+    max_frames = FRAME_RATE * 35
+    for _ in range(WINDOW_SIZE - 1):
+        ret, frame = cap_in.read()
 
-        print_dbg(args, f"checking frame... {frame_name} ({len(frames_faces[frame_idx][1])})")
+        if not ret:
+            break
 
-        for frame_face_idx in range(len(frames_faces[frame_idx][1])):
-            best = (999999.9, "no face", "no frame", (0, 0, 0, 0, ), )
-            print_dbg(args, f"checking face {frame_face_idx}")
-            for badge_idx in range(len(args["badges"])):
-                face_coord, face_image = frames_faces[frame_idx][1][frame_face_idx]
+        sys.stdout.write("|")
+        sys.stdout.flush()
 
-                dist = spatial.distance.cosine(face_image, badges_faces[badge_idx])
-                print_dbg(args, f"    distance for {args['badges'][badge_idx]}: {dist}")
-                if dist < best[0]:
-                    best = (dist, args["badges"][badge_idx], frame_name, face_coord, )
+        frames_window_faces.append(list(reorder_closest_points(
+            frames_window_faces[-1],
+            list(process_one_frame(face_cascade, model, frame, args, badges_faces))
+        )))
 
-            print_dbg(args, f"best for face {frame_face_idx} in frame {args['frames'][frame_idx]} is {best[1]} ({best[0]})")
-            if best[1] not in best_for_each:
-                best_for_each[best[1]] = best
-            else:
-                if best[0] < best_for_each[best[1]][0]:
-                    best_for_each[best[1]] = best
+    while frames_window_faces:
+        sys.stdout.write("+")
+        sys.stdout.flush()
 
-    for badge, best in best_for_each.items():
-        print(f"[FOUND] {badge} in frame {best[2]} ({best[0]})")
+        ret, new_frame = cap_in.read()
+        if ret:
+            frames_window.append(new_frame)
+            frames_window_faces.append(list(reorder_closest_points(
+                frames_window_faces[-1],
+                list(process_one_frame(face_cascade, model, new_frame, args, badges_faces))
+            )))
 
-    for frame_idx in range(len(args["frames"])):
-        frame_name = args["frames"][frame_idx]
-        img = frames_faces[frame_idx][0]
+        curr_frame = frames_window.pop(0)
+        curr_frame_faces = frames_window_faces.pop(0)
+        for face_idx, face_data in enumerate(curr_frame_faces):
+            _, _, face_coord = face_data
+            (x, y, _, h, ) = face_coord
+            badge = most_likely_face(frames_window_faces, face_idx)
+            curr_frame = cv2.putText(
+                curr_frame,
+                badge,
+                (x, y+h+15, ),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 128, 128),
+                1,
+                cv2.LINE_AA
+            )
 
-        for badge, best in best_for_each.items():
-            if best[2] == frame_name:
-                (x, y, w, h) = best[3]
-                img = cv2.rectangle(
-                    img,
-                    (x, y, ),
-                    (x+w, y+h, ),
-                    (0, 255, 0),
-                    1
-                )
-                img = cv2.putText(
-                    img,
-                    best[1],
-                    (x, y+h+15, ),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    1,
-                    cv2.LINE_AA
-                )
+        cap_out.write(curr_frame)
 
-        cv2.imshow(frame_name, img)
-        cv2.waitKey()
+        max_frames -= 1
+        if max_frames < 1:
+            break
+
+    print(" done!")
+    cap_in.release()
+    cap_out.release()
+    cv2.destroyAllWindows()
+
+    # print("[INFO] detecting faces in frames...")
+    # frames_faces = [
+    #     get_all_faces_image(face_cascade, model, i)
+    #     for i in args["frames"]
+    # ]
+    #
+    # print("[INFO] scoring faces...")
+    # best_for_each = {}
+    #
+    # for frame_idx in range(len(args["frames"])):
+    #     frame_name = args["frames"][frame_idx]
+    #
+    #     print_dbg(args, f"checking frame... {frame_name} ({len(frames_faces[frame_idx][1])})")
+    #
+    #     for frame_face_idx in range(len(frames_faces[frame_idx][1])):
+    #         best = (999999.9, "no face", "no frame", (0, 0, 0, 0, ), )
+    #         print_dbg(args, f"checking face {frame_face_idx}")
+    #         for badge_idx in range(len(args["badges"])):
+    #             face_coord, face_image = frames_faces[frame_idx][1][frame_face_idx]
+    #
+    #             dist = spatial.distance.cosine(face_image, badges_faces[badge_idx])
+    #             print_dbg(args, f"    distance for {args['badges'][badge_idx]}: {dist}")
+    #             if dist < best[0]:
+    #                 best = (dist, args["badges"][badge_idx], frame_name, face_coord, )
+    #
+    #         print_dbg(args, f"best for face {frame_face_idx} in frame {args['frames'][frame_idx]} is {best[1]} ({best[0]})")
+    #         if best[1] not in best_for_each:
+    #             best_for_each[best[1]] = best
+    #         else:
+    #             if best[0] < best_for_each[best[1]][0]:
+    #                 best_for_each[best[1]] = best
+    #
+    # for badge, best in best_for_each.items():
+    #     print(f"[FOUND] {badge} in frame {best[2]} ({best[0]})")
+    #
+    # for frame_idx in range(len(args["frames"])):
+    #     frame_name = args["frames"][frame_idx]
+    #     img = frames_faces[frame_idx][0]
+    #
+    #     for badge, best in best_for_each.items():
+    #         if best[2] == frame_name:
+    #             (x, y, w, h) = best[3]
+    #
+    #     cv2.imshow(frame_name, img)
+    #     cv2.waitKey()
 
 
 main()
