@@ -138,7 +138,7 @@ def main():
 
     print("[INFO] loading APN model...")
     model = APN_Model()
-    model.load_state_dict(torch.load("models/best_model_0.3.1.pt", map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load("models/best_model_0.5.1.pt", map_location=torch.device('cpu')))
     model.eval()
 
     print("[INFO] loading face model...")
@@ -162,7 +162,7 @@ def main():
     _, frame = cap_in.read()
     frames_window = [frame, ]
     frames_window_faces = [process_one_frame(face_cascade, model, frame, args, badges_faces), ]
-    max_frames = FRAME_RATE * 35
+    max_frames = FRAME_RATE * 90
     for _ in range(WINDOW_SIZE - 1):
         ret, frame = cap_in.read()
 

@@ -1,14 +1,16 @@
 import torch
-import timm  # https://timm.fast.ai/
+import torchvision
 
-EMBEDDING_SIZE=300
+EMBEDDING_SIZE=350
 
 class APN_Model(torch.nn.Module):
     def __init__(self, emb_size=EMBEDDING_SIZE):
         super(APN_Model, self).__init__()
 
-        self.efficient_net = timm.create_model("efficientnet_b0", pretrained=False)
-        self.efficient_net.classifier = torch.nn.Linear(in_features=self.efficient_net.classifier.in_features, out_features=emb_size)
+        self.model = torchvision.models.resnet50(weights="IMAGENET1K_V2")
+        self.model.fc = torch.nn.Linear(in_features=self.model.fc.in_features, out_features=EMBEDDING_SIZE)
 
     def forward(self, images):
-        return self.efficient_net(images)
+        embeddings = self.model(images)
+
+        return embeddings
