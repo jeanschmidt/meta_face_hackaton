@@ -1,5 +1,7 @@
+facenet-pytorch
 opencv-python
-torch
-timm
 scikit-image
+timm
+torch
 torchvision
+tqdm
