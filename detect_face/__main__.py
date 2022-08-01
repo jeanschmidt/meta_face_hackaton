@@ -122,12 +122,12 @@ def process_one_frame(face_cascade, model, frame, args, badges_faces):
         yield (score, badge, face_coord, )
 
 def most_likely_face(frames_window, face_idx):
-    counts = defaultdict(int)
+    scores = defaultdict(float)
     for frame in frames_window:
-        counts[frame[face_idx][1]] += 1
-    mx = 0
+        scores[frame[face_idx][1]] += 2 - frame[face_idx][0]
+    mx = -99999999999999.9
     badge = ""
-    for b, c in counts.items():
+    for b, c in scores.items():
         if c > mx:
             mx = c
             badge = b
