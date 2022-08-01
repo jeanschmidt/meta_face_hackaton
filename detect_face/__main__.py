@@ -147,13 +147,10 @@ def most_likely_face(frames_window, face_idx):
     scores = defaultdict(float)
     for frame in frames_window:
         scores[frame[face_idx][1]] += 1 - frame[face_idx][0]
-    mx = -99999999999999.9
-    badge = ""
-    for b, c in scores.items():
-        if c > mx:
-            mx = c
-            badge = b
-    return badge
+    return (
+        (s, face_idx, b, )
+        for b, s in scores.items()
+    )
 
 def detect_in_image(badges_faces, face_cascade, model, args):
     print("[INFO] Processing image...")
@@ -197,7 +194,7 @@ def detect_in_video(badges_faces, face_cascade, model, args):
     WINDOW_SIZE = 3 * FRAME_RATE
     _, frame = cap_in.read()
     frames_window = [frame, ]
-    frames_window_faces = [process_one_frame(face_cascade, model, frame, args, badges_faces), ]
+    frames_window_faces = [list(process_one_frame(face_cascade, model, frame, args, badges_faces)), ]
     # max_frames = FRAME_RATE * 3
 
     print("[INFO] preloading frames...")
@@ -229,10 +226,27 @@ def detect_in_video(badges_faces, face_cascade, model, args):
 
             curr_frame = frames_window.pop(0)
             curr_frame_faces = frames_window_faces.pop(0)
+
+            detected = {}
+            ranked = []
+            for face_idx in range(len(curr_frame_faces)):
+                ranked += list(most_likely_face(frames_window_faces, face_idx))
+            ranked.sort(reverse=True)
+
+            found_idxs = set()
+            found_badges = set()
+            for score, face_idx, badge in ranked:
+                if face_idx in found_idxs or badge in found_badges:
+                    continue
+                found_idxs.add(face_idx)
+                found_badges.add(badge)
+                detected[face_idx] = badge
+
             for face_idx, face_data in enumerate(curr_frame_faces):
                 _, _, face_coord = face_data
                 (x, y, xx, yy, ) = [int(n) for n in face_coord]
-                badge = most_likely_face(frames_window_faces, face_idx)
+                # badge = most_likely_face(frames_window_faces, face_idx)
+                badge = detected[face_idx]
                 curr_frame = cv2.rectangle(curr_frame, (x, y, ), (xx, yy, ), (0, 255, 0, ), 2)
                 curr_frame = cv2.putText(
                     curr_frame,
